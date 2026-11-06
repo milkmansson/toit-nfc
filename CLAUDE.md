@@ -12,8 +12,8 @@ repos may link back to it.
 | `toit-mfrc522` | MFRC522 driver (SPI, register-level, ISO 14443 Type A only) | Implements `Reader`/`Target`/`RawFrameTarget`; no MIFARE-specific code left in it at all |
 | `toit-pn53x` | PN532 driver (UART/I2C now, SPI TODO; command-level, firmware does anticollision) | Implements `Reader`/`Target` (not `RawFrameTarget` — no raw-frame access); kebab-cased |
 | `toit-mifare-classic` | MIFARE Classic: sectors, access bits, Crypto1, key recovery | `ClassicCard`/`AccessBits`/`MifareException`/`crypto1.toit` moved in from `toit-mfrc522`, built on `Reader`/`RawFrameTarget`; key recovery still not implemented |
-| `toit-mifare-ultralight` | MIFARE Ultralight/NTAG: pages, `PWD_AUTH`, counters | Not started |
-| `toit-nfc-parser` | Hardware-free parsing: NDEF, MAD, card ID, Flipper `.nfc` format | Not started |
+| `toit-mifare-ultralight` | MIFARE Ultralight/NTAG: pages, `PWD_AUTH`, counters | `UltralightCard`/`UltralightVersion` built on `Target` (no raw-frame access needed, unlike Classic); Ultralight C's 3DES auth and model-specific config pages out of scope |
+| `toit-nfc-parser` | Hardware-free parsing: NDEF, TLV, MAD, Flipper `.nfc` format | `ndef`/`tlv`/`mad`/`flipper` modules done (MAD1 only, not MAD2); no dedicated card-ID module beyond `CardType` |
 
 Ian's hardware: MFRC522 and PN532 sample boards, MIFARE 1K cards, NTAG cards,
 plus some unidentified cards to be identified as this is built out.
@@ -219,6 +219,48 @@ time:
     recovery (darkside/nested/mfkey-style attacks) itself. The plumbing
     (`RawFrameTarget`, the moved engine) is now in place for it.
 
+- **2026-11-06 (steps 4 and 5, done together):** Built both
+  `toit-mifare-ultralight` and `toit-nfc-parser`, picked because neither
+  needs hardware to write or test — see "what else can we continue with
+  before a hardware test is mandatory" in the session this was done in.
+  - `toit-mifare-ultralight`: `UltralightCard` (read, write, authenticate
+    via `PWD_AUTH`, get-version, read-signature, read-counter) built on
+    `Target` directly — notably, none of the Ultralight-family commands
+    need `RawFrameTarget`, unlike Classic's Crypto1, so this package works
+    over any reader including the PN532. `UltralightException` mirrors
+    the NAK-code shape of `toit-mifare-classic`'s `MifareException`.
+    Scoped out: Ultralight C's 3DES authentication (no 3DES in the SDK),
+    and per-model configuration pages (`AUTH0`/`ACCESS`/`CFG0`/`CFG1` —
+    their page numbers differ per model/memory size, which would need a
+    model lookup table built on firmer ground than memory). Unit-tested
+    against the NTAG213 `GET_VERSION` response documented in NXP's
+    datasheet.
+  - `toit-nfc-parser`: `ndef` (`NdefRecord`/`NdefMessage`, well-known
+    Text/URI helpers, chunked records explicitly rejected rather than
+    mis-parsed), `tlv` (Type 2 Tag memory TLV framing, plus
+    `Tlv.find-ndef-message`), `mad` (MAD1 only — sectors 1-15; MAD2 not
+    implemented), `flipper` (the stable backbone of Flipper's `.nfc`
+    format: device type/UID/ATQA/SAK/block-or-page dumps; unrecognized
+    fields kept verbatim rather than rejected, since the format evolves
+    across firmware versions). No dedicated card-identification module —
+    `CardType` in `toit-nfc` already covers what's identifiable from SAK
+    alone; going further (eg. NTAG213 vs 215 vs 216) needs
+    `GET_VERSION`, which needs hardware.
+  - Confidence notes, both flagged to Ian directly and in each package's
+    README rather than as hedge-words buried in code comments: the MAD
+    CRC parameters (`CRC-8/MIFARE-MAD`: poly `0x1D`, init `0xC7`) are
+    self-checked against that algorithm's own published test vector
+    (`"123456789"` → `0x99`), which confirms the SDK's `Crc` is configured
+    the way that catalogued algorithm is defined, but that's independent
+    of whether it's actually what a real MAD-using card uses. The Flipper
+    `.nfc` format support is built from its publicly documented shape,
+    not a live export from an actual Flipper device. Both are listed as
+    good first things to check once there's hardware (or a Flipper)
+    at hand.
+  - Everything in both packages is round-trip tested (encode then decode,
+    or the reverse) rather than against real data, since that's the
+    strongest check available without hardware.
+
 ## Carried over from toit-mfrc522's TODO.md and .reference/notes.txt
 
 `toit-mfrc522` had its own `TODO.md` and a `.reference/notes.txt` (research
@@ -275,12 +317,23 @@ nested-auth bug above needs a wider net to catch.
    Crypto1 only, see above). Running the same example against a PN532
    board is still outstanding — needs real hardware testing, which
    hasn't happened yet (Ian is travelling).
-4. Add `toit-mifare-ultralight` for NTAG support.
-5. Build `toit-nfc-parser` for NDEF/MAD/card-ID/Flipper-format, independent
-   of any hardware.
+4. ~~Add `toit-mifare-ultralight` for NTAG support~~ — done (read, write,
+   authenticate, get-version, read-signature, read-counter). Not run
+   against a real chip yet.
+5. ~~Build `toit-nfc-parser` for NDEF/MAD/Flipper-format~~ — done
+   (`ndef`, `tlv`, `mad` — MAD1 only — and `flipper`). No dedicated
+   card-identification module was built; `CardType` in `toit-nfc` already
+   covers SAK-based identification, and anything beyond that (eg.
+   distinguishing NTAG213/215/216) needs `GET_VERSION`, which is
+   hardware-only, so there wasn't more to add here without a reader.
 6. Later: ISO-DEP + DESFire, nested authentication, key-recovery attacks
    against owned cards (planned as a v1 feature of
-   `toit-mifare-classic`, not required for first read/write release).
+   `toit-mifare-classic`, not required for first read/write release),
+   Ultralight C's 3DES authentication, MAD2.
+7. Software ISO-DEP layer (RATS, I-blocks, WTX chaining) — not built yet;
+   needed for any ISO 14443-4 card (DESFire, NTAG 424). Doesn't need
+   hardware to write or unit-test (synthetic I-block/WTX exchanges), so
+   this is available to pick up before a hardware test is mandatory too.
 
 ## Upstream
 
