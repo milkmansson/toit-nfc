@@ -14,7 +14,8 @@ repos may link back to it.
 | `toit-mifare-classic` | MIFARE Classic: sectors, access bits, Crypto1, key recovery | `ClassicCard`/`AccessBits`/`MifareException`/`crypto1.toit` moved in from `toit-mfrc522`, built on `Reader`/`RawFrameTarget`; key recovery still not implemented |
 | `toit-mifare-ultralight` | MIFARE Ultralight/NTAG: pages, `PWD_AUTH`, counters, Ultralight C 3DES auth | `UltralightCard`/`UltralightVersion` built on `Target` (no raw-frame access needed, unlike Classic); Ultralight C auth added via `toit-des`; model-specific config pages still out of scope |
 | `toit-nfc-parser` | Hardware-free parsing: NDEF, TLV, MAD/MAD2, Flipper `.nfc` format | `ndef`/`tlv`/`mad`/`flipper` modules done, including MAD2 and NDEF chunk reassembly; no dedicated card-ID module beyond `CardType` |
-| `toit-des` | DES/3DES (software), not NFC-specific | `Des`/`TripleDes`/`cbc-encrypt`/`cbc-decrypt` done; used by `toit-mifare-ultralight`, planned for a future DESFire package |
+| `toit-des` | DES/3DES (software), not NFC-specific | `Des`/`TripleDes`/`cbc-encrypt`/`cbc-decrypt` done; used by `toit-mifare-ultralight` and `toit-des-fire` |
+| `toit-des-fire` | MIFARE DESFire native command set (legacy DES/3DES) | Version/AID/file enumeration, legacy `Authenticate`, plain-mode `ReadData`/`WriteData` done; secure messaging (MACed/enciphered) not implemented |
 
 Ian's hardware: MFRC522 and PN532 sample boards, MIFARE 1K cards, NTAG cards,
 plus some unidentified cards to be identified as this is built out.
@@ -417,6 +418,49 @@ time:
     deliberately breaking each one and confirming the suite failed, then
     reverting.
 
+- **2026-11-07 (toit-des-fire, new package):** Built DESFire's legacy
+  (DES/2K3DES) native command set on `IsoDepCard` + `toit-des`, in a new
+  repo Ian created (same pattern as `toit-des`: it's a card-family
+  package, not a core piece, so it doesn't belong in `toit-nfc` itself).
+  - Implemented: `GetVersion` (exercises `IsoDepCard`'s own multi-frame
+    chaining via DESFire's `0xAF` "additional frame" status, a different
+    use of `0xAF` than ISO-DEP's own chaining bit — DESFire's native
+    layer has its own, separate continuation mechanism riding on top of
+    ISO-DEP's), `GetApplicationIDs`, `SelectApplication`,
+    `CreateApplication`, `DeleteApplication`, `FormatPICC`,
+    `GetFreeMemory`, legacy `Authenticate` (same ISO/IEC 9798-2
+    three-pass structure as Ultralight C's, plus a session-key
+    derivation step Ultralight C's auth doesn't have), `GetFileIDs`,
+    `GetFileSettings`, `CreateStdDataFile`, `DeleteFile`, `ReadData`/
+    `WriteData` (plain communication mode only), and `DesFireException`
+    (full native status-byte table).
+  - Explicitly **not** implemented: ISO 7816-4-wrapped command framing
+    (native framing covers every DESFire generation), AES authentication
+    and the separate ISO/3K3DES scheme (both EV1-and-up alternatives to
+    the legacy scheme built here), and secure messaging (MACed/
+    enciphered communication) — `authenticate` derives a session key but
+    nothing yet uses it to protect subsequent commands, so `read-data`/
+    `write-data` only work against "Plain" files. Secure messaging is
+    the natural next piece on top of this.
+  - **Confidence note on the session-key derivation formula**: while
+    researching it (`RndA[0:4]+RndB[0:4]+RndA[4:8]+RndB[4:8]` for a
+    2K3DES key), found one source stating this formula and others
+    disputing it without a clear resolution. Since nothing in the
+    package consumes the derived key yet, there's no independent way to
+    test it right now — flagged in the README as the first thing to
+    verify once secure messaging exists and there's a real card at hand.
+  - The authentication handshake itself (not the session-key formula) is
+    checked by simulating the full PICC side with real shared-key crypto,
+    same technique as Ultralight C's test, including a wrong-key case —
+    which surfaced a useful realization while writing the test: a wrong
+    key causes the *PICC* to reject first (its decrypted RndB' won't
+    match), not the PCD, since the PCD can't tell its key is wrong until
+    it sees the PICC's response. Verified the chaining and handshake
+    logic actually discriminate by deliberately breaking each one
+    (un-rotating RndB, flipping the native chaining dispatch) and
+    confirming the suite failed, then reverting. Not run against a real
+    DESFire card.
+
 ## Carried over from toit-mfrc522's TODO.md and .reference/notes.txt
 
 `toit-mfrc522` had its own `TODO.md` and a `.reference/notes.txt` (research
@@ -484,16 +528,20 @@ nested-auth bug above needs a wider net to catch.
    distinguishing NTAG213/215/216) needs `GET_VERSION`, which is
    hardware-only, so there wasn't more to add here without a reader.
 6. ~~Ultralight C's 3DES authentication~~ — done (`toit-des` +
-   `authenticate-ultralight-c`; see progress log). Still later: DESFire
-   (needs step 7 plus DESFire's own command set and session-key
-   derivation), nested authentication, key-recovery attacks against
-   owned cards (planned as a v1 feature of `toit-mifare-classic`, not
-   required for first read/write release), MAD2.
+   `authenticate-ultralight-c`; see progress log). Still later: nested
+   authentication, key-recovery attacks against owned cards (planned as
+   a v1 feature of `toit-mifare-classic`, not required for first
+   read/write release).
 7. ~~Software ISO-DEP layer (RATS, I-blocks, WTX chaining)~~ — done
    (`IsoDepCard` in `toit-nfc/src/iso-dep.toit`; see progress log). A
    simple retry-the-same-block recovery was added afterward; PPS stays
    deliberately unimplemented since no driver can act on a negotiated
    bit rate yet — see the README.
+8. ~~MIFARE DESFire's legacy (DES/2K3DES) native command set~~ — done
+   (new repo `toit-des-fire`; see progress log). Secure messaging
+   (MACed/enciphered communication) is the natural next piece on top of
+   it, whenever that's picked up; AES authentication and ISO/3K3DES are
+   later EV1-and-up alternatives not covered yet either.
 
 ## Upstream
 
