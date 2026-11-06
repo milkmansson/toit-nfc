@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import .card-type show CardType
+import .frame show Frame
 
 /**
 What a $Reader chip does itself versus what has to be done in software on
@@ -99,3 +100,24 @@ interface Reader:
   Returns the first $Target found, or null if none answered.
   */
   poll --new/bool=false -> Target?
+
+/**
+A $Target that can send and receive raw ISO 14443-3 frames: no automatic
+  CRC, and parity bits exactly as given rather than computed.
+
+Only implemented by readers with $ReaderCapabilities.supports-raw-frames.
+This is the primitive MIFARE Classic Crypto1 authentication (and
+  Crypto1 key-recovery attacks) are built on in software, since the
+  authentication handshake's parity bits themselves carry keystream
+  information that a normal $Target.transceive call's automatic parity
+  handling would destroy.
+*/
+interface RawFrameTarget:
+  /**
+  Transmits $frame and returns the response, or null on timeout.
+
+  If $Frame.is-raw, sends its bytes and parity bits exactly as given.
+  Otherwise, computes standard odd parity for it, the same as
+    $Target.transceive would.
+  */
+  transceive-raw frame/Frame -> Frame?

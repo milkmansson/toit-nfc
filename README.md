@@ -20,22 +20,36 @@ package built on top of it.
 
 | Package | Contents |
 |---|---|
-| **toit-nfc** (core) | Reader interface (`on`/`off`, poll, select, halt, transceive), capability flags, shared `NfcException`, CRC-A, AN10833 type table, software ISO-DEP layer |
-| **toit-mfrc522** | Register/FIFO/IRQ driver implementing the core interface; keeps `crypto1.toit` short-term |
-| **toit-pn53x** | Command/transport driver (UART/I2C now, SPI to add) implementing the core interface |
+| **toit-nfc** (core) | `Reader`/`Target`/`RawFrameTarget` interfaces, capability flags, shared `NfcException`, `Frame`, CRC-A, AN10833 type table |
+| **toit-mfrc522** | Register/FIFO/IRQ driver implementing the core interface; frame-level, raw-frame-capable |
+| **toit-pn53x** | Command/transport driver (UART/I2C now, SPI to add) implementing the core interface; firmware-level, no raw-frame access |
 | **toit-mifare-classic** | Sector/block/access-bits logic, Crypto1 (moved from mfrc522), authentication, nested/darkside/mfkey-style recovery against your own cards (v1, can land after basic read/write) |
 | **toit-mifare-ultralight** | Page layout, `PWD_AUTH`, counters/signatures |
 | **toit-nfc-parser** | Hardware-free: byte dumps → structured data. NDEF/TLV, MAD, card-type identification, Flipper `.nfc` import/export |
 
-## Status
+## CRC-A is not reimplemented here
 
-This package now holds: `NfcException`; CRC-A (`crc-a` re-exported from the
-SDK's `crypto.crc`, plus a `check-crc-a` helper); the AN10833 card-type
-table (`CardType`); and the `Reader`/`Target` interface (plus
-`ReaderCapabilities`), implemented by both `toit-mfrc522` and `toit-pn53x`.
-Still to come: a software ISO-DEP layer, and any chip-authentication
-interface MIFARE Classic needs (deferred until `toit-mifare-classic` is
-being built, so it's shaped by real use rather than guessed).
+`src/crc.toit` re-exports the SDK's own `crypto.crc.crc-a` rather than
+hand-rolling the ISO 14443-3 CRC_A polynomial. We checked first: the SDK's
+`Crc.little-endian 16 --normal-polynomial=0x1021 --initial-state=0x6363` is
+bit-for-bit identical to the CRC_A used throughout this protocol family
+(verified against several ISO 14443-3 test vectors, including the
+empty-input case), so there was no reason to carry a second copy of that
+math. Only a small `check-crc-a` wrapper (CRC check + throwing
+`NfcException`) is this package's own code. Flagging this explicitly in
+case there's a reason (e.g. an existing Toit convention we're not aware of)
+to do it differently.
+
+## MIFARE Classic authentication is software-only, by design
+
+`toit-mifare-classic` does not use any reader chip's own hardware Crypto1
+unit (MFRC522's `MFAuthent`, or the PN532 firmware's equivalent). It runs
+Crypto1 entirely in software over raw frames (`RawFrameTarget`, above),
+because a hardware fast path can't do nested authentication, which
+MIFARE Classic key recovery needs — so the software path is required
+regardless, and a separate hardware-only path for plain reads would just
+be extra surface to maintain for no functional gain. Full reasoning in
+[toit-mifare-classic's README](https://github.com/milkmansson/toit-mifare-classic#authentication-is-done-entirely-in-software).
 
 See [CLAUDE.md](CLAUDE.md) for the working notes and progress log on this
 effort.
