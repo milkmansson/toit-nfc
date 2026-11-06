@@ -13,7 +13,7 @@ repos may link back to it.
 | `toit-pn53x` | PN532 driver (UART/I2C now, SPI TODO; command-level, firmware does anticollision) | Implements `Reader`/`Target` (not `RawFrameTarget` — no raw-frame access); kebab-cased |
 | `toit-mifare-classic` | MIFARE Classic: sectors, access bits, Crypto1, key recovery | `ClassicCard`/`AccessBits`/`MifareException`/`crypto1.toit` moved in from `toit-mfrc522`, built on `Reader`/`RawFrameTarget`; key recovery still not implemented |
 | `toit-mifare-ultralight` | MIFARE Ultralight/NTAG: pages, `PWD_AUTH`, counters, Ultralight C 3DES auth | `UltralightCard`/`UltralightVersion` built on `Target` (no raw-frame access needed, unlike Classic); Ultralight C auth added via `toit-des`; model-specific config pages still out of scope |
-| `toit-nfc-parser` | Hardware-free parsing: NDEF, TLV, MAD, Flipper `.nfc` format | `ndef`/`tlv`/`mad`/`flipper` modules done (MAD1 only, not MAD2); no dedicated card-ID module beyond `CardType` |
+| `toit-nfc-parser` | Hardware-free parsing: NDEF, TLV, MAD/MAD2, Flipper `.nfc` format | `ndef`/`tlv`/`mad`/`flipper` modules done, including MAD2 and NDEF chunk reassembly; no dedicated card-ID module beyond `CardType` |
 | `toit-des` | DES/3DES (software), not NFC-specific | `Des`/`TripleDes`/`cbc-encrypt`/`cbc-decrypt` done; used by `toit-mifare-ultralight`, planned for a future DESFire package |
 
 Ian's hardware: MFRC522 and PN532 sample boards, MIFARE 1K cards, NTAG cards,
@@ -382,6 +382,40 @@ time:
     transports, so none of them can be unit-tested from `tests/` without
     changing that — which is why `toit-pn53x` has no test files for any
     of its three transports. Not run against a real board.
+
+- **2026-11-06 (toit-nfc-parser polish — MAD2, NDEF chunking, Flipper
+  verification):** Closed out the remaining explicitly-scoped-out gaps
+  in `toit-nfc-parser`.
+  - `Mad2` added to `mad.toit`: the sector-16 AID table a 4K card has,
+    covering sectors 17-39 (3 data blocks: 7+8+8 AIDs). Before
+    implementing, searched for and confirmed the block count (3, not 2)
+    and that MAD2's equivalent of MAD1's info byte is RFU (not a second
+    copy of the multi-application flag/card-publisher-sector, which live
+    only in MAD1). Also found and resolved a byte-order discrepancy: one
+    source (Baltech's docs) claims the AID's high byte is the
+    application code, but NXP's own AN10787 — the authoritative source —
+    says the opposite (function cluster code is the high byte), which is
+    what this package already followed; good to have checked rather than
+    assumed, but no code change resulted.
+  - `ndef.toit`'s `NdefMessage.parse` now reassembles chunked records
+    instead of rejecting them (encoding still never produces chunked
+    output — nothing in this package's own data needs it). While testing,
+    deliberately introduced then caught a real bug via a sed mistake: the
+    chunk-payload accumulator wasn't reset between successive chunked
+    records in the same message, so a second chunked record's payload
+    got the first one's bytes prepended. Added a dedicated two-chunked-
+    records-in-one-message regression test and confirmed it fails without
+    the fix.
+  - `flipper.toit`: no code changes. Verified, rather than guessed at,
+    that the existing generic "unknown fields round-trip verbatim"
+    design already handles the real field set a Flipper Zero MIFARE
+    Classic export has (`Mifare Classic type`, `Data format version`,
+    confirmed via the Flipper developer docs) — this package doesn't need
+    typed accessors for those fields for them to survive a round-trip
+    losslessly.
+  - Verified the new MAD2 and chunking tests actually discriminate by
+    deliberately breaking each one and confirming the suite failed, then
+    reverting.
 
 ## Carried over from toit-mfrc522's TODO.md and .reference/notes.txt
 
