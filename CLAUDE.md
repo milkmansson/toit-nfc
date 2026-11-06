@@ -12,8 +12,9 @@ repos may link back to it.
 | `toit-mfrc522` | MFRC522 driver (SPI, register-level, ISO 14443 Type A only) | Implements `Reader`/`Target`/`RawFrameTarget`; no MIFARE-specific code left in it at all |
 | `toit-pn53x` | PN532 driver (UART/I2C now, SPI TODO; command-level, firmware does anticollision) | Implements `Reader`/`Target` (not `RawFrameTarget` — no raw-frame access); kebab-cased |
 | `toit-mifare-classic` | MIFARE Classic: sectors, access bits, Crypto1, key recovery | `ClassicCard`/`AccessBits`/`MifareException`/`crypto1.toit` moved in from `toit-mfrc522`, built on `Reader`/`RawFrameTarget`; key recovery still not implemented |
-| `toit-mifare-ultralight` | MIFARE Ultralight/NTAG: pages, `PWD_AUTH`, counters | `UltralightCard`/`UltralightVersion` built on `Target` (no raw-frame access needed, unlike Classic); Ultralight C's 3DES auth and model-specific config pages out of scope |
+| `toit-mifare-ultralight` | MIFARE Ultralight/NTAG: pages, `PWD_AUTH`, counters, Ultralight C 3DES auth | `UltralightCard`/`UltralightVersion` built on `Target` (no raw-frame access needed, unlike Classic); Ultralight C auth added via `toit-des`; model-specific config pages still out of scope |
 | `toit-nfc-parser` | Hardware-free parsing: NDEF, TLV, MAD, Flipper `.nfc` format | `ndef`/`tlv`/`mad`/`flipper` modules done (MAD1 only, not MAD2); no dedicated card-ID module beyond `CardType` |
+| `toit-des` | DES/3DES (software), not NFC-specific | `Des`/`TripleDes`/`cbc-encrypt`/`cbc-decrypt` done; used by `toit-mifare-ultralight`, planned for a future DESFire package |
 
 Ian's hardware: MFRC522 and PN532 sample boards, MIFARE 1K cards, NTAG cards,
 plus some unidentified cards to be identified as this is built out.
@@ -261,6 +262,48 @@ time:
     or the reverse) rather than against real data, since that's the
     strongest check available without hardware.
 
+- **2026-11-06 (toit-des, and Ultralight C auth):** Ian asked whether
+  3DES is viable in software given it's not in the SDK. Answer: yes —
+  3DES's weaknesses (64-bit block size, effective key strength below its
+  nominal bit count) are about scale, not about it being broken the way
+  Crypto1 is; the SDK just doesn't ship it. MIFARE Ultralight C and
+  legacy MIFARE DESFire (EV0, and EV1 in backward-compatible mode) both
+  need it and are still out in the field, so built it.
+  - New package `toit-des`: `Des` (single DES) and `TripleDes` (3DES,
+    EDE mode, 16-byte 2-key or 24-byte 3-key), plus `cbc-encrypt`/
+    `cbc-decrypt`. Deliberately **not** NFC-specific — no dependency on
+    or awareness of `toit-nfc` — because DES/3DES has no NFC-specific
+    content; it's a generic cipher the SDK happens to be missing. Lives
+    as its own repo rather than inside `toit-nfc` for that reason. A
+    future DESFire package would depend on it directly, the same way
+    `toit-mifare-ultralight` now does.
+  - Checked against the classic published DES known-answer test vector
+    (key `13 34 57 79 9B BC DF F1`, plaintext `01 23 45 67 89 AB CD EF`
+    → ciphertext `85 E8 13 54 0F 0A B4 05`) — confirmed to actually
+    discriminate by deliberately corrupting one table entry and
+    confirming the test suite failed, then reverting. Also checked the
+    degenerate identity that 3DES with all three keys equal must equal
+    plain single DES (holds regardless of whether the cipher matches the
+    real standard — it only proves encrypt/decrypt are true inverses of
+    each other; the known-answer test is what proves standards
+    compliance). None of this run against real hardware.
+  - Added `UltralightCard.authenticate-ultralight-c` to
+    `toit-mifare-ultralight`, implementing Ultralight C's 3DES mutual
+    authentication (ISO/IEC 11770-2 three-pass) on top of `toit-des`.
+    Tested by simulating the tag side of the handshake with the same key
+    (`FakeUltralightCTarget` in the test file — same technique as
+    `crypto1-test.toit`'s reader-against-writer simulation), which
+    checks the CBC chaining, nonce-rotation and comparison logic is
+    self-consistent; verified this test actually discriminates by
+    breaking the rotation check and confirming the test failed, then
+    reverting. **Open question, flagged in the package's README**: the
+    exact byte-level framing of the second step's response (whether the
+    card's final reply carries a leading status byte before the 8-byte
+    encrypted nonce) wasn't checked against a real card or the datasheet
+    text this session — the code accepts either shape rather than
+    committing to one, and this is the first thing to verify once
+    there's an Ultralight C card and reader on hand.
+
 ## Carried over from toit-mfrc522's TODO.md and .reference/notes.txt
 
 `toit-mfrc522` had its own `TODO.md` and a `.reference/notes.txt` (research
@@ -326,10 +369,11 @@ nested-auth bug above needs a wider net to catch.
    covers SAK-based identification, and anything beyond that (eg.
    distinguishing NTAG213/215/216) needs `GET_VERSION`, which is
    hardware-only, so there wasn't more to add here without a reader.
-6. Later: ISO-DEP + DESFire, nested authentication, key-recovery attacks
-   against owned cards (planned as a v1 feature of
-   `toit-mifare-classic`, not required for first read/write release),
-   Ultralight C's 3DES authentication, MAD2.
+6. ~~Ultralight C's 3DES authentication~~ — done (`toit-des` +
+   `authenticate-ultralight-c`; see progress log). Still later: ISO-DEP
+   + DESFire, nested authentication, key-recovery attacks against owned
+   cards (planned as a v1 feature of `toit-mifare-classic`, not required
+   for first read/write release), MAD2.
 7. Software ISO-DEP layer (RATS, I-blocks, WTX chaining) — not built yet;
    needed for any ISO 14443-4 card (DESFire, NTAG 424). Doesn't need
    hardware to write or unit-test (synthetic I-block/WTX exchanges), so
