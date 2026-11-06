@@ -1,0 +1,5 @@
+prefixes:
+  nfc: toit-nfc
+packages:
+  toit-nfc:
+    path: ..

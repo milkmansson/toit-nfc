@@ -304,6 +304,50 @@ time:
     committing to one, and this is the first thing to verify once
     there's an Ultralight C card and reader on hand.
 
+- **2026-11-06 (ISO-DEP layer):** Built `IsoDepCard` in
+  `toit-nfc/src/iso-dep.toit` — RATS/ATS and the I-block/R-block/S-block
+  framing (`toit-mifare-classic`/`toit-mifare-ultralight` sit directly on
+  `Target`; a future DESFire or NTAG 424 package would sit on this
+  instead). Lives in `toit-nfc` itself, not its own repo, since it has no
+  card-specific content — same reasoning as `Frame`/CRC-A, the opposite
+  conclusion from `toit-des` (which has no *NFC*-specific content and so
+  got its own repo).
+  - Only needs plain `Target.transceive`, not raw-frame access — RATS
+    and I-blocks are standard framed command/response pairs with their
+    own CRC, not a raw-frame-only exchange like Crypto1 — so this works
+    over any reader, PN532 included.
+  - Before writing the PCB (Protocol Control Byte) bit constants from
+    memory, searched for and cross-checked them against a real captured
+    I-block (PCB `0x0A`: CID-following, block 0) and R-block (PCB `0xBA`:
+    NAK, CID-following, block 0) rather than trusting recollection alone
+    — they matched what was recalled, which is reassuring but not the
+    same as a hardware test. Also confirmed the ATS field layout (T0's
+    presence bits for TA1/TB1/TC1, FSCI in T0's low nibble, FWI/SFGI in
+    TB1) against multiple independent sources before implementing the
+    parser.
+  - Implements: FSC (max frame size) from ATS's FSCI, FWI→FWT informational
+    only (not actively enforced — `Target.transceive`'s timeout is the
+    underlying driver's concern, not this layer's), NAD/CID support flags
+    from TC1, historical bytes, I-block chaining in both directions
+    (splitting an outgoing APDU wider than FSC, reassembling a chained
+    response), transparent S(WTX) echo-back, S(DESELECT) on `close`.
+  - Explicitly **not** implemented: PPS (bit-rate negotiation — costs
+    throughput, not correctness, to skip) and R-block-based
+    retransmission on a corrupted/missing reply (needs real timeout/retry
+    handling this layer doesn't have yet; a broken exchange throws
+    instead of retrying).
+  - Tested by simulating the full PICC side of the protocol independently
+    of `IsoDepCard`'s own code (`FakeIsoDepTarget` in
+    `tests/iso-dep-test.toit` — same "simulate both sides" technique as
+    `crypto1-test.toit` and the Ultralight C auth test): ATS parsing (both
+    a TL-only response and one with all of TA1/TB1/TC1 and historical
+    bytes present), a plain exchange, outgoing request chaining, incoming
+    response chaining, a WTX request mid-response, and deselect-on-close.
+    Verified the chaining and WTX tests actually discriminate by
+    deliberately breaking each one (wrong chaining bit, wrong WTX
+    selector) and confirming the suite failed, then reverting. None of
+    this has been run against a real ISO 14443-4 card.
+
 ## Carried over from toit-mfrc522's TODO.md and .reference/notes.txt
 
 `toit-mfrc522` had its own `TODO.md` and a `.reference/notes.txt` (research
@@ -370,14 +414,15 @@ nested-auth bug above needs a wider net to catch.
    distinguishing NTAG213/215/216) needs `GET_VERSION`, which is
    hardware-only, so there wasn't more to add here without a reader.
 6. ~~Ultralight C's 3DES authentication~~ — done (`toit-des` +
-   `authenticate-ultralight-c`; see progress log). Still later: ISO-DEP
-   + DESFire, nested authentication, key-recovery attacks against owned
-   cards (planned as a v1 feature of `toit-mifare-classic`, not required
-   for first read/write release), MAD2.
-7. Software ISO-DEP layer (RATS, I-blocks, WTX chaining) — not built yet;
-   needed for any ISO 14443-4 card (DESFire, NTAG 424). Doesn't need
-   hardware to write or unit-test (synthetic I-block/WTX exchanges), so
-   this is available to pick up before a hardware test is mandatory too.
+   `authenticate-ultralight-c`; see progress log). Still later: DESFire
+   (needs step 7 plus DESFire's own command set and session-key
+   derivation), nested authentication, key-recovery attacks against
+   owned cards (planned as a v1 feature of `toit-mifare-classic`, not
+   required for first read/write release), MAD2.
+7. ~~Software ISO-DEP layer (RATS, I-blocks, WTX chaining)~~ — done
+   (`IsoDepCard` in `toit-nfc/src/iso-dep.toit`; see progress log).
+   PPS and R-block retransmission on a bad reply are explicitly not
+   implemented — see the README.
 
 ## Upstream
 

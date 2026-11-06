@@ -20,7 +20,7 @@ package built on top of it.
 
 | Package | Contents |
 |---|---|
-| **toit-nfc** (core) | `Reader`/`Target`/`RawFrameTarget` interfaces, capability flags, shared `NfcException`, `Frame`, CRC-A, AN10833 type table |
+| **toit-nfc** (core) | `Reader`/`Target`/`RawFrameTarget` interfaces, capability flags, shared `NfcException`, `Frame`, CRC-A, AN10833 type table, ISO-DEP (`IsoDepCard`) |
 | **toit-mfrc522** | Register/FIFO/IRQ driver implementing the core interface; frame-level, raw-frame-capable |
 | **toit-pn53x** | Command/transport driver (UART/I2C now, SPI to add) implementing the core interface; firmware-level, no raw-frame access |
 | **toit-mifare-classic** | Sector/block/access-bits logic, Crypto1 (moved from mfrc522), authentication, nested/darkside/mfkey-style recovery against your own cards (v1, can land after basic read/write) |
@@ -50,6 +50,34 @@ MIFARE Classic key recovery needs — so the software path is required
 regardless, and a separate hardware-only path for plain reads would just
 be extra surface to maintain for no functional gain. Full reasoning in
 [toit-mifare-classic's README](https://github.com/milkmansson/toit-mifare-classic#authentication-is-done-entirely-in-software).
+
+## ISO-DEP (ISO/IEC 14443-4)
+
+`IsoDepCard` (in `src/iso-dep.toit`) is the transport layer any ISO
+14443-4 card needs — MIFARE DESFire, NTAG 424 DNA, JavaCards. It does
+RATS/ATS and the I-block/R-block/S-block framing (chaining in both
+directions, S(WTX) time-extension requests, S(DESELECT)) on top of a
+plain `Target`, since none of that needs raw-frame access — it's a
+standard framed command/response exchange like any other ISO 14443-3
+command, so it works over any reader, the PN532 included.
+
+It lives here rather than in a card-family package for the same reason
+`Frame` and CRC-A do: it has no card-specific content, so any future
+package built on ISO 14443-4 (a DESFire package, say) can depend on it
+directly rather than duplicating it.
+
+Protocol and Parameter Selection (PPS) isn't implemented — every card
+falls back to working at the default bit rate PPS would otherwise speed
+up, so skipping it costs throughput, not correctness. Neither is
+R-block-based retransmission on a corrupted or missing reply; that needs
+real timeout/retry handling this layer doesn't have yet, so a broken
+exchange throws rather than silently retrying. The PCB bit layout used
+here was cross-checked against a real captured I-block and R-block
+(found during this work, not from memory alone) rather than taken purely
+from recollection, but the class as a whole hasn't been run against real
+hardware yet — only against a simulation of both sides of the protocol
+(see `tests/iso-dep-test.toit`), which is the strongest check available
+without an actual ISO 14443-4 card and reader on hand.
 
 ---
 
