@@ -219,6 +219,51 @@ time:
     recovery (darkside/nested/mfkey-style attacks) itself. The plumbing
     (`RawFrameTarget`, the moved engine) is now in place for it.
 
+## Carried over from toit-mfrc522's TODO.md and .reference/notes.txt
+
+`toit-mfrc522` had its own `TODO.md` and a `.reference/notes.txt` (research
+notes, kept — with the datasheets — in `.reference/`, now committed there
+pending a conversation with floitsch about whether they belong in the repo
+at all). The items below are specifically about Crypto1/MIFARE Classic,
+so they're now about `toit-mifare-classic`, not `toit-mfrc522`; moved here
+since that's where they'll actually get picked up.
+
+**Open TODOs:**
+- **Nested authentication is wired up but known not to actually work.**
+  `crypto1.toit`'s state machine supports it (`MifareCryptoReader`
+  transitions to a nested state when `start-authentication` is called a
+  second time), and `ClassicCard.authenticate` exercises that path
+  automatically on a second call — but the original note says this was
+  tried against real hardware and didn't work, without a confirmed root
+  cause. Said to use the trace papers in `.reference/notes.txt` (below) to
+  figure out why. This is almost certainly the first thing to debug before
+  attempting any nested-auth-dependent key-recovery attack.
+- **Naming consistency**: `crypto1.toit` isn't fully consistent about
+  "plain"/"plaintext" vs "cipher"/"ciphertext" terminology. Minor, cosmetic,
+  low priority.
+- **Bring back the "crypto-writer"**: `MifareCryptoWriter` already exists
+  in `crypto1.toit` (used today only by the test, to simulate the tag side
+  of a handshake) but nothing drives it for real. Relevant once tag
+  emulation becomes a goal — PN532 can emulate a tag; MFRC522 can't (see
+  "Known gaps" above).
+
+**Reference material worth keeping even if `.reference/` itself doesn't
+survive the floitsch conversation** — attack techniques and sources to
+read before implementing MIFARE Classic key recovery in
+`toit-mifare-classic`:
+- Wirelessly Pickpocketing a Mifare Classic Card: https://repository.ubn.ru.nl/bitstream/handle/2066/75545/1/75545.pdf
+- Dismantling Mifare (darkside attack; reader attack = LFSR rollback, section 6.2): https://www.cs.bham.ac.uk/~garciaf/publications/Dismantling.Mifare.pdf
+- Ciphertext-only cryptanalysis on hardened MIFARE Classic cards: http://www.cs.ru.nl/~rverdult/Ciphertext-only_Cryptanalysis_on_Hardened_Mifare_Classic_Cards-CCS_2015.pdf
+- DEF CON China — tag-side attacks against NFC (also explains attacking Crypto1 from the tag side): https://media.defcon.org/DEF%20CON%20China%201/DEF%20CON%20China%201%20presentations/DEF%20CON%20China%201.0%20-%20Presentations/DEF%20CON%20China%201.0%20-%20Christopher-Wade-Tag-side-attacks-against-NFC.pdf
+- Proxmark3's `mfkey32` (reference implementation of the nested-auth key-recovery math): https://github.com/Proxmark/proxmark3/blob/master/tools/mfkey/mfkey32.c
+- Hardnested attack implemented against an actual MFRC522 (closest prior art to what we'd build): https://github.com/HakonHystad/MFRC522_nested_attack
+- MIFARE Ultralight protocol description, including how to build a tag emulator (relevant to `toit-mifare-ultralight` too): https://ora.ox.ac.uk/catalog/uuid:8e52bcfe-5ab5-40b8-b1f4-6b11fd0e67f2/download_file?file_format=application%2Fpdf&safe_filename=12-15.pdf
+
+Real captured authentication traces (reader↔tag byte exchanges with known
+keys) are also in `.reference/notes.txt` — useful as additional
+`crypto1-test.toit` test vectors beyond the ones already there, if the
+nested-auth bug above needs a wider net to catch.
+
 ## Plan / order of work
 
 1. ~~Extract the core interface from `toit-mfrc522` with no behaviour
