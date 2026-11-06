@@ -14,6 +14,8 @@ main:
   test-incoming-response-chaining
   test-wtx-during-response
   test-deselect-on-close
+  test-retries-on-transient-failure
+  test-gives-up-after-too-many-failures
 
 test-ats-defaults-with-tl-only-response:
   fake := FakeIsoDepTarget
@@ -112,6 +114,31 @@ test-deselect-on-close:
   card.close
   expect fake.was-deselected
 
+test-retries-on-transient-failure:
+  request := #[0x11]
+  reply := #[0x22]
+  fake := FakeIsoDepTarget
+      --ats-response=#[0x01]
+      --reply-chunk-size=32
+      --expected-request=request
+      --reply-data=reply
+      --fail-count=2 // Fewer than the retry limit: should still succeed.
+  card := IsoDepCard fake
+  expect-bytes-equal reply (card.transceive request)
+
+test-gives-up-after-too-many-failures:
+  request := #[0x11]
+  reply := #[0x22]
+  fake := FakeIsoDepTarget
+      --ats-response=#[0x01]
+      --reply-chunk-size=32
+      --expected-request=request
+      --reply-data=reply
+      --fail-count=100 // More than the retry limit: should give up.
+  card := IsoDepCard fake
+  expect-throw "ISO_DEP_NO_RESPONSE":
+    card.transceive request
+
 /**
 Plays the PICC side of ISO 14443-4 (RATS/ATS, I-block chaining in both
   directions, S(WTX), S(DESELECT)), independently of $IsoDepCard's own
@@ -133,18 +160,21 @@ class FakeIsoDepTarget implements Target:
   sent-wtx_/bool := false
   wtx-was-echoed-back-unchanged/bool := false
   was-deselected/bool := false
+  fail-count_/int := 0
 
   constructor
       --ats-response/ByteArray
       --reply-chunk-size/int
       --inject-wtx/bool=false
       --expected-request/ByteArray=#[]
-      --reply-data/ByteArray=#[]:
+      --reply-data/ByteArray=#[]
+      --fail-count/int=0:
     ats-response_ = ats-response
     reply-chunk-size_ = reply-chunk-size
     inject-wtx_ = inject-wtx
     expected-request_ = expected-request
     reply-data_ = reply-data
+    fail-count_ = fail-count
 
   /** Resets this fake for a second, independent exchange on the same connection. */
   expect-next request/ByteArray --reply/ByteArray -> none:
@@ -162,6 +192,10 @@ class FakeIsoDepTarget implements Target:
     if bytes.size == 2 and bytes[0] == 0xE0 and not rats-done_:
       rats-done_ = true
       return ats-response_
+
+    if fail-count_ > 0:
+      fail-count_ -= 1
+      return null
 
     pcb := bytes[0]
     block-type := pcb & 0xC0

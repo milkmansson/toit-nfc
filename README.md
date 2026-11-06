@@ -66,18 +66,28 @@ It lives here rather than in a card-family package for the same reason
 package built on ISO 14443-4 (a DESFire package, say) can depend on it
 directly rather than duplicating it.
 
-Protocol and Parameter Selection (PPS) isn't implemented — every card
-falls back to working at the default bit rate PPS would otherwise speed
-up, so skipping it costs throughput, not correctness. Neither is
-R-block-based retransmission on a corrupted or missing reply; that needs
-real timeout/retry handling this layer doesn't have yet, so a broken
-exchange throws rather than silently retrying. The PCB bit layout used
-here was cross-checked against a real captured I-block and R-block
-(found during this work, not from memory alone) rather than taken purely
-from recollection, but the class as a whole hasn't been run against real
-hardware yet — only against a simulation of both sides of the protocol
-(see `tests/iso-dep-test.toit`), which is the strongest check available
-without an actual ISO 14443-4 card and reader on hand.
+Protocol and Parameter Selection (PPS) isn't implemented, deliberately:
+it would have nothing to do, since negotiating a faster bit rate is
+pointless until the underlying reader driver can actually switch the
+PICC's communication speed, and neither `toit-mfrc522` nor `toit-pn53x`
+exposes that yet. Worth revisiting once a driver supports changing bit
+rate.
+
+A failed exchange (a timeout, or a corrupted/CRC-failing reply) is
+retried a few times by resending the exact same block, rather than
+throwing immediately. This is a simplification of the standard's own
+recovery, which would distinguish "my command never arrived" from "the
+reply got corrupted" and use an R-block in the latter case — not
+implemented here, since the distinction can't be meaningfully checked
+without real hardware noise to provoke it.
+
+The PCB bit layout used here was cross-checked against a real captured
+I-block and R-block (found during this work, not from memory alone)
+rather than taken purely from recollection, but the class as a whole
+hasn't been run against real hardware yet — only against a simulation
+of both sides of the protocol (see `tests/iso-dep-test.toit`), which is
+the strongest check available without an actual ISO 14443-4 card and
+reader on hand.
 
 ---
 

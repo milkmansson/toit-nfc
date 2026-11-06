@@ -22,17 +22,23 @@ Needs only plain $Target.transceive, not raw-frame access: RATS and the
   reader, PN532 included.
 
 Protocol and Parameter Selection (PPS) — which would negotiate a faster
-  bit rate after RATS — is not implemented; every card this talks to
-  still works at the default bit rate PPS would otherwise speed up, so
-  skipping it costs throughput, not correctness.
+  bit rate after RATS — is still not implemented, and deliberately so:
+  it would have nothing to do. PPS only matters if the underlying reader
+  driver can actually switch the PICC's communication speed, and neither
+  `toit-mfrc522` nor `toit-pn53x` exposes that yet, so negotiating a
+  faster rate here would just be protocol-level theater with no way to
+  act on it. Worth revisiting once a driver supports changing bit rate.
 
-R-block based retransmission on a corrupted or missing reply is also not
-  implemented: if an exchange doesn't complete cleanly, $transceive
-  throws rather than retrying, since retrying correctly needs real
-  timeout/retry handling this layer doesn't have yet.
+A failed exchange (a timeout, or a corrupted/CRC-failing reply) is now
+  retried up to a few times by resending the exact same block, rather
+  than immediately throwing — see $send-and-wait-out-wtx_ for why this
+  is a simplification of the standard's own recovery (which would
+  distinguish the two failure cases and use an R-block in one of them)
+  rather than a full implementation of it.
 */
 class IsoDepCard implements Target:
   static RATS_ ::= 0xE0
+  static MAX-RETRIES_ ::= 3
 
   // PCB (Protocol Control Byte) bit layout, cross-checked against a real
   // captured R-block (PCB 0xBA: NAK, CID-following, block 0) and I-block
@@ -191,9 +197,23 @@ class IsoDepCard implements Target:
   */
   send-and-wait-out-wtx_ frame/ByteArray -> ByteArray:
     outgoing := frame
+    attempts := 0
     while true:
-      response := target_.transceive outgoing --check-crc
-      if not response: throw "ISO_DEP_NO_RESPONSE"
+      response/ByteArray? := null
+      exception := catch: response = target_.transceive outgoing --check-crc
+      if exception or not response:
+        // Treats a timeout (null response) and a corrupted/CRC-failing
+        // response the same way: resend the exact same block and hope
+        // the retry gets through. This is a simplification of the
+        // standard's own recovery (which would distinguish "my command
+        // never arrived" from "the reply got corrupted" and respond
+        // with an R-block in the latter case) that this layer doesn't
+        // implement, since it can't be meaningfully checked without
+        // real hardware noise to provoke it.
+        attempts += 1
+        if attempts > MAX-RETRIES_: throw "ISO_DEP_NO_RESPONSE"
+        continue
+      attempts = 0
       if (block-type_ response) == PCB-TYPE-S-BLOCK_ and response[0] & 0x30 == 0x30:
         outgoing = response // Echo the WTX request back unchanged.
         continue

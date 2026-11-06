@@ -336,6 +336,20 @@ time:
     retransmission on a corrupted/missing reply (needs real timeout/retry
     handling this layer doesn't have yet; a broken exchange throws
     instead of retrying).
+  - **2026-11-06 follow-up:** closed both gaps partially. Added a simple
+    retry (resend the exact same block, up to 3 times) on a timeout or a
+    caught exception from `target_.transceive`, in
+    `send-and-wait-out-wtx_`. This is a simplification of the standard's
+    own R-block-based recovery (which would distinguish "my command
+    never arrived" from "the reply got corrupted"), kept simple since
+    that distinction can't be meaningfully checked without real hardware
+    noise. Verified the new tests (`test-retries-on-transient-failure`,
+    `test-gives-up-after-too-many-failures`) actually discriminate by
+    temporarily lowering the retry limit and confirming the suite failed,
+    then reverting. PPS is still deliberately not implemented — it
+    would negotiate a bit rate that neither `toit-mfrc522` nor
+    `toit-pn53x` can currently act on, so there's nothing for it to do
+    yet.
   - Tested by simulating the full PICC side of the protocol independently
     of `IsoDepCard`'s own code (`FakeIsoDepTarget` in
     `tests/iso-dep-test.toit` — same "simulate both sides" technique as
@@ -420,9 +434,10 @@ nested-auth bug above needs a wider net to catch.
    owned cards (planned as a v1 feature of `toit-mifare-classic`, not
    required for first read/write release), MAD2.
 7. ~~Software ISO-DEP layer (RATS, I-blocks, WTX chaining)~~ — done
-   (`IsoDepCard` in `toit-nfc/src/iso-dep.toit`; see progress log).
-   PPS and R-block retransmission on a bad reply are explicitly not
-   implemented — see the README.
+   (`IsoDepCard` in `toit-nfc/src/iso-dep.toit`; see progress log). A
+   simple retry-the-same-block recovery was added afterward; PPS stays
+   deliberately unimplemented since no driver can act on a negotiated
+   bit rate yet — see the README.
 
 ## Upstream
 
