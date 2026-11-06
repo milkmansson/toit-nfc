@@ -29,11 +29,13 @@ package built on top of it.
 
 ## Status
 
-So far this package holds the pieces extracted from `toit-mfrc522` that don't
-depend on any particular chip: `NfcException`, CRC-A (`crc-a` re-exported
-from the SDK's `crypto.crc`, plus a `check-crc-a` helper), and the AN10833
-card-type table (`CardType`). The `Reader`/`Target` interface itself is
-drafted next, once `toit-pn53x` also needs to implement it.
+This package now holds: `NfcException`; CRC-A (`crc-a` re-exported from the
+SDK's `crypto.crc`, plus a `check-crc-a` helper); the AN10833 card-type
+table (`CardType`); and the `Reader`/`Target` interface (plus
+`ReaderCapabilities`), implemented by both `toit-mfrc522` and `toit-pn53x`.
+Still to come: a software ISO-DEP layer, and any chip-authentication
+interface MIFARE Classic needs (deferred until `toit-mifare-classic` is
+being built, so it's shaped by real use rather than guessed).
 
 See [CLAUDE.md](CLAUDE.md) for the working notes and progress log on this
 effort.

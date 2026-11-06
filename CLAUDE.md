@@ -8,9 +8,9 @@ repos may link back to it.
 
 | Repo | Role | Status |
 |---|---|---|
-| `toit-nfc` | Core reader interface + shared pieces | Just started; extracting from `toit-mfrc522` |
-| `toit-mfrc522` | MFRC522 driver (SPI, register-level, ISO 14443 Type A only) | Working driver exists; has Crypto1, needs refactor onto core interface |
-| `toit-pn53x` | PN532 driver (UART/I2C now, SPI TODO; command-level, firmware does anticollision) | Early scaffolding; `MifareCard` is a throwaway class in `src/main.toit`, needs proper implementation |
+| `toit-nfc` | Core reader interface + shared pieces | `Reader`/`Target` interface, `NfcException`, CRC-A, `CardType` all in place |
+| `toit-mfrc522` | MFRC522 driver (SPI, register-level, ISO 14443 Type A only) | Implements `Reader`/`Target`; has Crypto1 |
+| `toit-pn53x` | PN532 driver (UART/I2C now, SPI TODO; command-level, firmware does anticollision) | Implements `Reader`/`Target`; kebab-cased; throwaway `MifareCard` removed |
 | `toit-mifare-classic` | MIFARE Classic: sectors, access bits, Crypto1, key recovery | Not started; code to move out of `toit-mfrc522` |
 | `toit-mifare-ultralight` | MIFARE Ultralight/NTAG: pages, `PWD_AUTH`, counters | Not started |
 | `toit-nfc-parser` | Hardware-free parsing: NDEF, MAD, card ID, Flipper `.nfc` format | Not started |
@@ -46,13 +46,15 @@ plus some unidentified cards to be identified as this is built out.
 - Only PN532 can emulate a tag — PN532-specific feature, not in the core
   interface.
 - Neither chip reads 125 kHz (LF) tags, unlike Flipper Zero's RFID support.
-- `toit-mfrc522` has duplicate WIP `authenticate_`/`is_authenticated_`
-  definitions (`src/mfrc522.toit` ~lines 600-704) left over from in-progress
-  work; nested authentication doesn't work yet; the "crypto-writer" needs to
-  be brought back (see that repo's TODO.md).
-- `toit-pn53x` README/structure is still mostly the package template;
-  `src/main.toit` should not contain a real `MifareCard` implementation
-  long-term — that belongs in `toit-mifare-classic`.
+- `toit-mfrc522` still has a dead, commented-out hardware-path
+  `authenticate_`/`is_authenticated_` (`src/mfrc522.toit` ~lines 600-704,
+  wrapped in `/* */`) alongside the live software-Crypto1 one — left as-is
+  deliberately, see "Hardware vs. software crypto" below. Nested
+  authentication doesn't work yet; the "crypto-writer" needs to be brought
+  back (see that repo's TODO.md).
+- `toit-pn53x`'s `src/main.toit` throwaway `MifareCard` is gone (moved to
+  a `Reader`/`poll`-based example); real MIFARE Classic support still
+  belongs in `toit-mifare-classic`, not here.
 
 ## Progress log
 
@@ -85,12 +87,85 @@ plus some unidentified cards to be identified as this is built out.
     `type-to-str_` members removed from `mfrc522.toit`, replaced with calls
     into `toit-nfc`.
 
+- **2026-11-06 (same day, step 2):** Drafted `Reader`/`Target` interfaces
+  in `toit-nfc/src/reader.toit` (plus `ReaderCapabilities`), now that both
+  chip packages need one. Implemented them in both drivers:
+  - `toit-mfrc522`: `Mfrc522 implements Reader`, `Card implements Target`.
+    Added `poll --new/bool=false -> Target?` (wraps the existing
+    `wake-up-cards_`/`select_` pair) and `off` (wraps `antenna-off`). No
+    change to the existing `do --new [block]`/`with-picc` helpers — they
+    stay as the richer, mfrc522-specific API; `poll` is the new
+    interface-level primitive alongside them.
+  - `toit-pn53x`: full kebab-case pass (was still snake_case throughout);
+    `Pn53x implements Reader`, new `Pn53xTarget implements Target`. Added
+    real parsing of `InListPassiveTarget`'s response in
+    `Initiator.list-passive-targets` (target number, ATQA, SAK, UID — ATS
+    deliberately not parsed yet, that's ISO-DEP territory later). Dropped
+    the dead unused `frame_size_` method. Switched `UartCommunication_`
+    off the deprecated `reader`/`writer` libs onto `io.Reader`/`port.in`.
+    Moved the throwaway `MifareCard` example out of `src/main.toit`
+    entirely — it belonged in `toit-mifare-classic`, not here — and
+    replaced the example with one built on `pn53x.poll`.
+  - **This slice's PN532 response-parsing code has not been run against
+    real hardware yet** (no PN532 board in this environment). Ian: please
+    smoke-test `examples/main.toit` against your board before relying on
+    `list-passive-targets`/`poll` for anything real.
+  - Deliberately did NOT touch `toit-mfrc522`'s commented-out hardware-path
+    `authenticate_`/`is_authenticated_` (lines ~600-704, wrapped in `/* */`)
+    or write a `MifareClassicAuthenticator`-style interface yet — see
+    "Hardware vs. software crypto" below; that decision is better made
+    once `toit-mifare-classic` exists and both chips' auth paths are used
+    for real.
+
+## Hardware vs. software crypto (MIFARE Classic / Crypto1)
+
+Both reader chips can do MIFARE Classic authentication in hardware:
+- MFRC522 has a `MFAuthent` command (`COMMAND-MF-AUTHENT_`) that runs
+  Crypto1 on-chip.
+- PN532 firmware runs Crypto1 on-chip behind `InDataExchange` with
+  `0x60`/`0x61` (what `toit-pn53x`'s old throwaway example already used).
+
+`toit-mfrc522` currently does **not** use its hardware path — it has a
+dead, commented-out hardware `authenticate_` and a live software one
+(`MifareCryptoReader`, driven over raw frames). This was a deliberate
+earlier tradeoff, not an oversight: the hardware `MFAuthent` command can't
+do nested authentication (you can't get at the raw nonce exchange once the
+chip's own crypto unit is engaged), and nested authentication is required
+for key-recovery attacks — one of Ian's v1 goals for `toit-mifare-classic`.
+So: **prefer hardware Crypto1 for plain authenticate/read/write (saves
+cycles, matches "use the hardware algorithm where it doesn't cost us a
+feature"), but keep the software path available for nested/darkside/
+mfkey-style recovery**, since that's the one thing the hardware path can
+never do on either chip. Concretely, once `toit-mifare-classic` exists,
+this probably means: a fast hardware-backed `authenticate` through
+whichever chip-native path, with the raw-frame software Crypto1 engaged
+only when the recovery code specifically needs it (gated by
+`ReaderCapabilities.supports-raw-frames`).
+
+## Crypto building blocks already in the Toit SDK
+
+Checked `crypto.*` in the SDK (v2.0.0) for what we can reuse instead of
+hand-rolling, since the CRC-A case showed this is worth checking every
+time:
+- **CRC-A**: `crypto.crc.crc-a` — exact ISO 14443-3 algorithm, confirmed
+  bit-identical (see above). `toit-nfc/src/crc.toit` re-exports it.
+- **AES**: `crypto.aes` is present — relevant once `toit-mifare-classic`
+  or a future DESFire/NTAG 424 package needs AES (DESFire EV1+ and
+  NTAG 424 DNA use AES, not Crypto1).
+- **3DES**: NOT in the SDK's `crypto` library. MIFARE Ultralight C uses
+  3DES for its authentication — `toit-mifare-ultralight` will need to
+  bring its own (or find a package that has it) when it gets there.
+- **Crypto1**: obviously not in the SDK (it's MIFARE-proprietary and
+  broken); `crypto1.toit` in `toit-mfrc522` stays the only implementation,
+  to be moved into `toit-mifare-classic` in step 3.
+
 ## Plan / order of work
 
-1. Extract the core interface from `toit-mfrc522` with no behaviour change
-   (its `crypto1_test` should keep passing throughout).
-2. Clean up `toit-pn53x` scaffolding (naming, README, SPI stub) and implement
-   the core interface on top of it.
+1. ~~Extract the core interface from `toit-mfrc522` with no behaviour
+   change~~ — done.
+2. ~~Clean up `toit-pn53x` scaffolding (naming, README) and implement the
+   core `Reader`/`Target` interface on both drivers~~ — done, except the
+   SPI stub (still unimplemented on both chips).
 3. Build `toit-mifare-classic` on the core interface; run the same
    example against both boards as the acceptance test.
 4. Add `toit-mifare-ultralight` for NTAG support.
