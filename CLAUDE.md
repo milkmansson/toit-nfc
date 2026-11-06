@@ -33,10 +33,9 @@ plus some unidentified cards to be identified as this is built out.
   has to sit above both: "find a target, select it, exchange bytes" — not
   "send raw bits".
 - `toit-mfrc522` already drives through Toit's generic `serial.Device` /
-  `serial.Registers`, which is bus-agnostic (SPI or I2C). `toit-pn53x` is not
-  there yet (hardcodes I2C/UART transports, no SPI stub implemented) — this
-  needs fixing so both drivers accept whatever bus the chip actually
-  supports.
+  `serial.Registers`, which is bus-agnostic (SPI or I2C). `toit-pn53x`
+  supports UART, I2C, and (as of 2026-11-06) SPI, via `Pn53x.uart`,
+  `Pn53x.i2c`, `Pn53x.spi` — see progress log.
 
 ## Known gaps / limitations to design around
 
@@ -362,6 +361,28 @@ time:
     selector) and confirming the suite failed, then reverting. None of
     this has been run against a real ISO 14443-4 card.
 
+- **2026-11-06 (toit-pn53x SPI transport):** Added `Pn53x.spi` and
+  `SpiCommunication_`, filling in the one gap left over from step 2
+  (`toit-pn53x` previously only had UART and I2C). Built from NXP
+  application note AN133910 ("PN532 SPI").
+  - The PN532 shifts data LSB-first on the wire, which Toit's `spi`
+    library has no setting for (`--mode` only configures CPOL/CPHA), so
+    every byte sent and received is bit-reversed in software. Before
+    reading a response, the host polls a status control byte until the
+    chip reports ready, replacing the IRQ pin the I2C transport uses for
+    the same purpose.
+  - **Estimates introduced, flagged per the standing instruction to call
+    these out**: the ~1 ms NSS-low wakeup pulse (from AN133910's own
+    text, not measured), and the 1000 ms status-poll timeout with a 1 ms
+    poll interval (both picked as reasonable values, not derived from a
+    specific datasheet number or a measurement). These are the first
+    things to tune once there's a real board to test against.
+  - `SpiCommunication_` and its bit-reversal/status-poll helpers are
+    library-private to `src/pn53x.toit`, the same as the UART/I2C
+    transports, so none of them can be unit-tested from `tests/` without
+    changing that — which is why `toit-pn53x` has no test files for any
+    of its three transports. Not run against a real board.
+
 ## Carried over from toit-mfrc522's TODO.md and .reference/notes.txt
 
 `toit-mfrc522` had its own `TODO.md` and a `.reference/notes.txt` (research
@@ -412,8 +433,9 @@ nested-auth bug above needs a wider net to catch.
 1. ~~Extract the core interface from `toit-mfrc522` with no behaviour
    change~~ — done.
 2. ~~Clean up `toit-pn53x` scaffolding (naming, README) and implement the
-   core `Reader`/`Target` interface on both drivers~~ — done, except the
-   SPI stub (still unimplemented on both chips).
+   core `Reader`/`Target` interface on both drivers~~ — done.
+   `toit-pn53x`'s SPI transport (the one gap left here) is also now
+   done — see progress log, 2026-11-06.
 3. ~~Build `toit-mifare-classic` on the core interface~~ — done (software
    Crypto1 only, see above). Running the same example against a PN532
    board is still outstanding — needs real hardware testing, which
