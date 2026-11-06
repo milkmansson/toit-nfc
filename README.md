@@ -27,5 +27,13 @@ package built on top of it.
 | **toit-mifare-ultralight** | Page layout, `PWD_AUTH`, counters/signatures |
 | **toit-nfc-parser** | Hardware-free: byte dumps → structured data. NDEF/TLV, MAD, card-type identification, Flipper `.nfc` import/export |
 
+## Status
+
+So far this package holds the pieces extracted from `toit-mfrc522` that don't
+depend on any particular chip: `NfcException`, CRC-A (`crc-a` re-exported
+from the SDK's `crypto.crc`, plus a `check-crc-a` helper), and the AN10833
+card-type table (`CardType`). The `Reader`/`Target` interface itself is
+drafted next, once `toit-pn53x` also needs to implement it.
+
 See [CLAUDE.md](CLAUDE.md) for the working notes and progress log on this
 effort.

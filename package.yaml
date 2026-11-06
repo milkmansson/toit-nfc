@@ -1,0 +1,2 @@
+name: nfc
+description: Shared core for NFC/RFID reader drivers and card packages (exceptions, CRC-A, card-type identification).

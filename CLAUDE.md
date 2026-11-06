@@ -54,6 +54,37 @@ plus some unidentified cards to be identified as this is built out.
   `src/main.toit` should not contain a real `MifareCard` implementation
   long-term — that belongs in `toit-mifare-classic`.
 
+## Progress log
+
+- **2026-11-06:** Step 1 slice done. Extracted `NfcException`, CRC-A and the
+  AN10833 `CardType` table out of `toit-mfrc522` into `toit-nfc/src/`, with
+  no behaviour change (`crypto1_test` output is byte-identical before and
+  after; verified by diff). `toit-mfrc522` now depends on `toit-nfc` as a
+  local path package (prefix `nfc`).
+  - Learning: Toit's SDK already ships the exact ISO 14443-3 CRC_A algorithm
+    as `crypto.crc.crc-a` (`Crc.little-endian 16 --normal-polynomial=0x1021
+    --initial-state=0x6363`) — verified bit-for-bit identical to the
+    hand-rolled version across several samples including the empty-input
+    case. `toit-nfc/src/crc.toit` now re-exports it instead of
+    reimplementing the polynomial, and only adds the `check-crc-a` wrapper
+    (CRC check + throwing `NfcException.crc`/`.protocol`) on top.
+  - Learning: `jag toit pkg install --local <path>` (SDK v2.0.0 / jag
+    v1.73.0) sometimes writes a `package.lock` where the `packages:` key has
+    a `-2`-suffixed name (e.g. `toit-nfc-2`) that doesn't match the name the
+    `prefixes:` section points at, breaking resolution. Fix by hand-editing
+    the lock file to make the key match the prefix target. Also: installing
+    a local package in a package's own `package.yaml` does NOT propagate to
+    that package's `tests/`/`examples/` sub-projects automatically — run
+    `jag toit pkg install --recompute` in each sub-project too after a
+    parent's dependencies change.
+  - The `Reader`/`Target` core interface was deliberately NOT drafted yet —
+    deferred to step 2, once `toit-pn53x` needs one too, so it's shaped by
+    two real implementations instead of guessed from one.
+  - `toit-mfrc522/src/nfc_exception.toit` deleted (fully replaced).
+    `compute-crc_`/`check-crc_` and the `Card.TYPE-*`/`sak-to-type_`/
+    `type-to-str_` members removed from `mfrc522.toit`, replaced with calls
+    into `toit-nfc`.
+
 ## Plan / order of work
 
 1. Extract the core interface from `toit-mfrc522` with no behaviour change
