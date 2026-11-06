@@ -50,6 +50,3 @@ MIFARE Classic key recovery needs — so the software path is required
 regardless, and a separate hardware-only path for plain reads would just
 be extra surface to maintain for no functional gain. Full reasoning in
 [toit-mifare-classic's README](https://github.com/milkmansson/toit-mifare-classic#authentication-is-done-entirely-in-software).
-
-See [CLAUDE.md](CLAUDE.md) for the working notes and progress log on this
-effort.
