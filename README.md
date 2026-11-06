@@ -23,8 +23,8 @@ package built on top of it.
 | **toit-nfc** (core) | Reader interface (`on`/`off`, poll, select, halt, transceive), capability flags, shared `NfcException`, CRC-A, AN10833 type table, software ISO-DEP layer |
 | **toit-mfrc522** | Register/FIFO/IRQ driver implementing the core interface; keeps `crypto1.toit` short-term |
 | **toit-pn53x** | Command/transport driver (UART/I2C now, SPI to add) implementing the core interface |
-| **toit-nfc-mifare-classic** | Sector/block/access-bits logic, Crypto1 (moved from mfrc522), authentication, nested/darkside/mfkey-style recovery against your own cards (v1, can land after basic read/write) |
-| **toit-nfc-mifare-ultralight** | Page layout, `PWD_AUTH`, counters/signatures |
+| **toit-mifare-classic** | Sector/block/access-bits logic, Crypto1 (moved from mfrc522), authentication, nested/darkside/mfkey-style recovery against your own cards (v1, can land after basic read/write) |
+| **toit-mifare-ultralight** | Page layout, `PWD_AUTH`, counters/signatures |
 | **toit-nfc-parser** | Hardware-free: byte dumps → structured data. NDEF/TLV, MAD, card-type identification, Flipper `.nfc` import/export |
 
 See [CLAUDE.md](CLAUDE.md) for the working notes and progress log on this

@@ -11,8 +11,8 @@ repos may link back to it.
 | `toit-nfc` | Core reader interface + shared pieces | Just started; extracting from `toit-mfrc522` |
 | `toit-mfrc522` | MFRC522 driver (SPI, register-level, ISO 14443 Type A only) | Working driver exists; has Crypto1, needs refactor onto core interface |
 | `toit-pn53x` | PN532 driver (UART/I2C now, SPI TODO; command-level, firmware does anticollision) | Early scaffolding; `MifareCard` is a throwaway class in `src/main.toit`, needs proper implementation |
-| `toit-nfc-mifare-classic` | MIFARE Classic: sectors, access bits, Crypto1, key recovery | Not started; code to move out of `toit-mfrc522` |
-| `toit-nfc-mifare-ultralight` | MIFARE Ultralight/NTAG: pages, `PWD_AUTH`, counters | Not started |
+| `toit-mifare-classic` | MIFARE Classic: sectors, access bits, Crypto1, key recovery | Not started; code to move out of `toit-mfrc522` |
+| `toit-mifare-ultralight` | MIFARE Ultralight/NTAG: pages, `PWD_AUTH`, counters | Not started |
 | `toit-nfc-parser` | Hardware-free parsing: NDEF, MAD, card ID, Flipper `.nfc` format | Not started |
 
 Ian's hardware: MFRC522 and PN532 sample boards, MIFARE 1K cards, NTAG cards,
@@ -52,7 +52,7 @@ plus some unidentified cards to be identified as this is built out.
   be brought back (see that repo's TODO.md).
 - `toit-pn53x` README/structure is still mostly the package template;
   `src/main.toit` should not contain a real `MifareCard` implementation
-  long-term — that belongs in `toit-nfc-mifare-classic`.
+  long-term — that belongs in `toit-mifare-classic`.
 
 ## Plan / order of work
 
@@ -60,14 +60,14 @@ plus some unidentified cards to be identified as this is built out.
    (its `crypto1_test` should keep passing throughout).
 2. Clean up `toit-pn53x` scaffolding (naming, README, SPI stub) and implement
    the core interface on top of it.
-3. Build `toit-nfc-mifare-classic` on the core interface; run the same
+3. Build `toit-mifare-classic` on the core interface; run the same
    example against both boards as the acceptance test.
-4. Add `toit-nfc-mifare-ultralight` for NTAG support.
+4. Add `toit-mifare-ultralight` for NTAG support.
 5. Build `toit-nfc-parser` for NDEF/MAD/card-ID/Flipper-format, independent
    of any hardware.
 6. Later: ISO-DEP + DESFire, nested authentication, key-recovery attacks
    against owned cards (planned as a v1 feature of
-   `toit-nfc-mifare-classic`, not required for first read/write release).
+   `toit-mifare-classic`, not required for first read/write release).
 
 ## Upstream
 
