@@ -552,6 +552,13 @@ floitsch about whether/how this lands upstream (likely squash-merged into
 new toitware repos or PRs), rather than publishing these as permanent
 forks.
 
+**None of the 8 repos auto-publish.** The `.github/workflows/publish.yml`
+(tag-push → `toitlang/pkg-publish`) was removed from all of them on
+2026-11-07 — floitsch wants to handle actually publishing these to the
+Toit package registry himself, as part of his own process for this
+package family. Don't re-add it when scaffolding a new package in this
+family (the `toit-package` skill's boilerplate includes one by default).
+
 ## Next hardware
 
 Chips worth sourcing as logical next additions to the collection, once the
