@@ -11,11 +11,11 @@ repos may link back to it.
 | `toit-nfc` | Core reader interface + shared pieces | `Reader`/`Target`/`RawFrameTarget` interfaces, `NfcException`, `Frame`, CRC-A, `CardType` all in place |
 | `toit-mfrc522` | MFRC522 driver (SPI, register-level, ISO 14443 Type A only) | Implements `Reader`/`Target`/`RawFrameTarget`; no MIFARE-specific code left in it at all |
 | `toit-pn53x` | PN532 driver (UART/I2C now, SPI TODO; command-level, firmware does anticollision) | Implements `Reader`/`Target` (not `RawFrameTarget` — no raw-frame access); kebab-cased |
-| `toit-mifare-classic` | MIFARE Classic: sectors, access bits, Crypto1, key recovery | `ClassicCard`/`AccessBits`/`MifareException`/`crypto1.toit` moved in from `toit-mfrc522`, built on `Reader`/`RawFrameTarget`; key recovery still not implemented |
+| `toit-mifare-classic` | MIFARE Classic: sectors, access bits, Crypto1, key recovery | `ClassicCard`/`AccessBits`/`MifareException`/`crypto1.toit` moved in from `toit-mfrc522`, built on `Reader`/`RawFrameTarget`; key recovery parked mid-implementation, see "MIFARE Classic key recovery — parked" below |
 | `toit-mifare-ultralight` | MIFARE Ultralight/NTAG: pages, `PWD_AUTH`, counters, Ultralight C 3DES auth | `UltralightCard`/`UltralightVersion` built on `Target` (no raw-frame access needed, unlike Classic); Ultralight C auth added via `toit-des`; model-specific config pages still out of scope |
 | `toit-nfc-parser` | Hardware-free parsing: NDEF, TLV, MAD/MAD2, Flipper `.nfc` format | `ndef`/`tlv`/`mad`/`flipper` modules done, including MAD2 and NDEF chunk reassembly; no dedicated card-ID module beyond `CardType` |
 | `toit-des` | DES/3DES (software), not NFC-specific | `Des`/`TripleDes`/`cbc-encrypt`/`cbc-decrypt` done; used by `toit-mifare-ultralight` and `toit-des-fire` |
-| `toit-des-fire` | MIFARE DESFire native command set (legacy DES/3DES) | Version/AID/file enumeration, legacy `Authenticate`, plain-mode `ReadData`/`WriteData` done; secure messaging (MACed/enciphered) not implemented |
+| `toit-des-fire` | MIFARE DESFire native command set | Version/AID/file enumeration; legacy/ISO-3K3DES/AES-128 `Authenticate`/`authenticate-iso`/`authenticate-aes` (one shared handshake implementation); `ReadData`/`WriteData` with Plain/MACed/Enciphered secure messaging (legacy CBC-MAC scheme — AES-CMAC, which is what real EV1 AES sessions use, is not implemented) |
 
 Ian's hardware: MFRC522 and PN532 sample boards, MIFARE 1K cards, NTAG cards,
 plus some unidentified cards to be identified as this is built out.
@@ -461,6 +461,88 @@ time:
     confirming the suite failed, then reverting. Not run against a real
     DESFire card.
 
+- **2026-11-07 (DESFire secure messaging, ISO/AES authentication, and
+  parking Classic key recovery):** Ian asked to do the remaining 4
+  hardware-free items from the prior session. Did all four, in this
+  order:
+  - **Crypto1 test vectors**: added a second real-world captured trace
+    (`toit-mfrc522/.reference/notes.txt`'s "key afffbfffcfff" trace) to
+    `crypto1-test.toit`, cross-checked two ways (matches both
+    `generate-challenge-response`'s own output and the re-encrypted
+    ciphertext byte-for-byte).
+  - **MIFARE Classic key recovery (mfkey32-style) — attempted, then
+    parked.** Spent a long stretch porting Proxmark3's `crapto1` (GPL,
+    read for understanding/constants only, not copied — rewritten as
+    original Toit code) into `/tmp/crypto1-derive/` (scratch, not in
+    any repo). Got the core cipher primitives (`crypto1_init`,
+    `filter`, forward clocking `crypto1_bit`/`crypto1_word`, and
+    backward clocking `lfsr_rollback_bit`/`lfsr_rollback_word`) fully
+    verified: byte-exact against the Oxford-paper real captured trace
+    already in `crypto1-test.toit`, and against hundreds of random
+    self-consistency round-trips against `crypto1.toit`'s own trusted
+    `Crypto1` class. Also fetched and read proxmark3's actual
+    `mfkey32()` (`client/src/mifare/mfkey.c`) to resolve a real
+    protocol-modeling confusion: the reader-nonce rollback step uses
+    the *ciphertext* with the feedback flag set (`is_encrypted`-style),
+    not the (attacker-unobservable) plaintext — the two are
+    mathematically equivalent forward, but only the ciphertext
+    formulation is usable backward without already knowing the key.
+    Where it stopped: the actual *search* (`lfsr_recovery32`) isn't
+    the simple "match 16 bits per half independently" approach
+    originally planned — the real algorithm only does that for the
+    first ~5 bits per half, then switches to a fused search tracking
+    partial LFSR-feedback parity bits (`update_contribution`) joined
+    via a custom bucket-sort, because a naive full cross-join of the
+    two ~500K-candidate tables is ~317 billion pairs. Ian chose to
+    park this here (verified cipher core as a solid foundation) rather
+    than port the bucket-sort tree search now, and work the two
+    DESFire items instead. **To resume**: the verified scratch code is
+    in `/tmp/crypto1-derive/` (not committed anywhere — it's
+    machine-local scratch, not part of any repo) — `port.toit`/
+    `rollback.toit`/`full2.toit` and friends; next step is porting
+    `update_contribution`/`extend_table`/`bucket_sort_intersect` (or a
+    self-devised, non-ported equivalent narrowing heuristic) on top of
+    that already-verified foundation.
+  - **DESFire secure messaging**: `read-data`/`write-data` now support
+    MACed (CBC-MAC, session key, zero IV, truncated to 4 bytes) and
+    Enciphered (CBC encryption, session key, zero IV, trailing CRC16)
+    communication settings, only protecting the data portion of a
+    command (matching DESFire's own plain-header/protected-data
+    split). Tested via a fake PICC that derives the same session key
+    independently and does its own MAC/encryption checks, not just
+    echoing bytes back.
+  - **DESFire ISO-3K3DES and AES-128 authentication**: added
+    `authenticate-iso` (command `0x1A`) and `authenticate-aes`
+    (command `0xAA`), refactoring the existing legacy `authenticate`
+    into one shared `authenticate-generic_` helper parameterized by
+    command byte, cipher, and nonce/block size (8 bytes for
+    DES-family, 16 for AES) — all three schemes are one tested code
+    path, not three. Secure messaging was generalized to be
+    block-size-agnostic (`SessionCipher_`) so it works with a session
+    key from any of the three, with a documented caveat: this is still
+    the *legacy* CBC-MAC/CBC-encryption scheme, not the AES-CMAC-based
+    one real EV1 cards use under AES authentication.
+  - **Confidence**: legacy's session-key formula has the same
+    documented uncertainty as before. AES's formula
+    (`RndA[0:4]+RndB[0:4]+RndA[12:16]+RndB[12:16]`) is a commonly-cited
+    one across independent DESFire libraries — more confidence than
+    legacy's, still unverified against real hardware. ISO 3K3DES's
+    formula is a genuine guess (an 8-byte RndA/RndB pair doesn't have
+    enough material for a 24-byte key without repeating some of it,
+    and which chunk repeats isn't sourced from anywhere). See
+    `toit-des-fire/README.md`'s "On confidence" section for the full
+    writeup. Verified the authentication handshake's shared code path
+    discriminates by deliberately breaking the RndB rotation and
+    confirming all three schemes' tests failed together, then
+    reverting.
+  - **Hardware test examples**: wrote/updated `examples/main.toit` in
+    `toit-pn53x`, `toit-mifare-classic`, `toit-mifare-ultralight`, and
+    `toit-des-fire`, all targeting Ian's I2C test harness (PN532: SDA
+    GPIO19, SCL GPIO20, IRQ GPIO7, RESET GPIO6) — see "Hardware test
+    plan" below for the procedure. All four compile cleanly (`jag toit
+    compile -s`); none have been run against real hardware yet (that's
+    the point — they're what Ian runs next).
+
 ## Carried over from toit-mfrc522's TODO.md and .reference/notes.txt
 
 `toit-mfrc522` had its own `TODO.md` and a `.reference/notes.txt` (research
@@ -538,10 +620,108 @@ nested-auth bug above needs a wider net to catch.
    deliberately unimplemented since no driver can act on a negotiated
    bit rate yet — see the README.
 8. ~~MIFARE DESFire's legacy (DES/2K3DES) native command set~~ — done
-   (new repo `toit-des-fire`; see progress log). Secure messaging
-   (MACed/enciphered communication) is the natural next piece on top of
-   it, whenever that's picked up; AES authentication and ISO/3K3DES are
-   later EV1-and-up alternatives not covered yet either.
+   (new repo `toit-des-fire`; see progress log).
+9. ~~DESFire secure messaging (MACed/Enciphered) and ISO-3K3DES/AES-128
+   authentication~~ — done (2026-11-07; see progress log). Still not
+   done: AES-CMAC secure messaging (what real EV1 AES sessions actually
+   use — this package's MACed/Enciphered modes are the legacy CBC-MAC
+   scheme, usable with any session key but not what a real card expects
+   under AES auth), and MIFARE Classic key recovery (parked, see below).
+
+## What's left before hardware testing
+
+As of 2026-11-07, every package that doesn't strictly need hardware to
+write or test has been built: core interfaces, all 8 repos' main
+functionality, and example programs targeting Ian's actual I2C
+harness. What's left genuinely needs real silicon, in two groups:
+
+**Needs only the I2C harness (PN532)** — run `toit-pn53x`'s example
+first to confirm the bus/chip itself, then whichever card-specific
+example matches what you have to hand. All four are untested against
+real hardware; see "Hardware test plan" below for the procedure and
+what each step is expected to prove or fail on.
+- `toit-pn53x`: bus bring-up, firmware version, card polling/typing.
+- `toit-mifare-classic`: plain block-0 read, and confirming
+  `authenticate` throws the documented capability error (PN532 has no
+  raw-frame access) rather than guessing something it can't.
+- `toit-mifare-ultralight`: read/write/version/signature/counter, and
+  `PWD_AUTH`/Ultralight-C 3DES authentication if you have cards that
+  support them.
+- `toit-des-fire`: version/AID enumeration, all three authentication
+  schemes, and Plain/MACed/Enciphered secure messaging round trips.
+
+**Needs the SPI harness (MFRC522), not the I2C one** — MIFARE Classic
+authenticated read/write and the still-open nested-authentication bug
+both need raw-frame access, which the PN532 doesn't have.
+`toit-mfrc522/examples/main.toit` already exists and compiles (SPI
+pins: MOSI 23, MISO 19, CLK 18, SS 5 — a *different* pin set than the
+I2C harness, note MISO happens to reuse the number 19). Once the I2C
+harness's `toit-mifare-classic` example confirms plain reads and the
+capability error both behave as expected, the natural next step on the
+SPI side is specifically the nested-authentication bug (see "Carried
+over" below) — that's the one open correctness question blocking any
+key-recovery work, parked or otherwise.
+
+Also genuinely hardware-only, not yet attempted: the MAD CRC
+parameters and Flipper `.nfc` format support in `toit-nfc-parser` are
+self-checked against published test vectors/docs but never against a
+live MAD-using card or an actual Flipper export (see that package's
+progress log entry); `toit-mifare-ultralight`'s Ultralight-C auth
+response framing ambiguity (see that package's README); and DESFire's
+various session-key-derivation formulas (see
+`toit-des-fire/README.md`'s "On confidence" section) — all listed here
+so they don't get lost, not because they need a new test written
+before the above.
+
+## Hardware test plan (I2C harness)
+
+Ian's I2C test harness: PN532, SDA GPIO19, SCL GPIO20, IRQ GPIO7,
+RESET GPIO6. These constants are duplicated at the top of each example
+below (`SDA`/`SCL`/`IRQ`/`RESET`) rather than shared, since each
+example is a separate, self-contained Toit program in a different
+repo; keep them in sync if the wiring changes.
+
+Run each example with `jag run examples/main.toit` from inside the
+relevant repo (flashes and runs on the ESP32; needs a device
+connected). Suggested order — each one builds confidence in the layer
+below it, so don't skip ahead if an earlier one fails:
+
+1. **`toit-pn53x/examples/main.toit`** — no card needed. Confirms the
+   I2C bus and chip itself: should print a firmware version, then
+   "no target found" repeatedly (or a target's UID/type if a card is
+   in the field). If this doesn't work, nothing below it will either —
+   check wiring (especially IRQ/RESET, which aren't the pins named in
+   the original 16/17-pin example this was adapted from) before
+   touching any card-specific package.
+2. **`toit-mifare-classic/examples/main.toit`** — needs a MIFARE
+   Classic (1K/4K/Mini) card. Expects: a real block-0 read (PASS), then
+   `authenticate` throwing (PASS — this is the *documented* PN532
+   limitation, not a bug). If `authenticate` *doesn't* throw, something
+   about that capability check has changed and is worth a closer look
+   before trusting Classic auth over any I2C reader.
+3. **`toit-mifare-ultralight/examples/main.toit`** — needs an
+   Ultralight/NTAG21x card. `GET_VERSION`/signature/counters returning
+   null is normal for older cards (original Ultralight, Ultralight C)
+   that don't implement them, not a failure. The write test defaults to
+   page 10, which is a guess, not a verified-safe page for your
+   specific card — check its memory map first if you're not sure.
+   Ultralight C's 3DES auth step is skipped unless `AUTH-C-KEY` is set.
+4. **`toit-des-fire/examples/main.toit`** — needs a DESFire card.
+   `authenticate` tries the commonly-cited all-zero factory-default
+   PICC master key; failing cleanly with `AUTHENTICATION_ERROR` just
+   means the key's been changed, not a bug. `RUN-WRITE-TESTS` (false
+   by default) gates everything that creates/deletes an
+   application/file — leave it false until you're certain the card in
+   the field is a scratch card. `authenticate-iso`/`authenticate-aes`
+   only run if `ISO-KEY`/`AES-KEY` are set, since a virgin card's PICC
+   master key is DES/2K3DES, not those.
+
+Whatever breaks, the most useful thing to bring back isn't just
+"it failed" but the exact exception/output — several of these steps
+are deliberately testing a *documented* boundary (step 2's expected
+throw, a null `GET_VERSION`), so "it printed something unexpected"
+and "it threw where PASS was expected" are different, more actionable
+kinds of failure than a bare crash.
 
 ## Upstream
 
