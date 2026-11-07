@@ -17,7 +17,7 @@ repos may link back to it.
 | `toit-des` | DES/3DES (software), not NFC-specific | `Des`/`TripleDes`/`cbc-encrypt`/`cbc-decrypt` done; used by `toit-mifare-ultralight` and `toit-des-fire` |
 | `toit-des-fire` | MIFARE DESFire native command set | Version/AID/file enumeration; legacy/ISO-3K3DES/AES-128 `Authenticate`/`authenticate-iso`/`authenticate-aes` (one shared handshake implementation); `ReadData`/`WriteData` with Plain/MACed/Enciphered secure messaging (legacy CBC-MAC scheme — AES-CMAC, which is what real EV1 AES sessions use, is not implemented) |
 
-Ian's hardware: MFRC522 and PN532 sample boards, MIFARE 1K cards, NTAG cards,
+Hardware on hand: MFRC522 and PN532 sample boards, MIFARE 1K cards, NTAG cards,
 plus some unidentified cards to be identified as this is built out.
 
 ## Why this split
@@ -108,7 +108,7 @@ plus some unidentified cards to be identified as this is built out.
     entirely — it belonged in `toit-mifare-classic`, not here — and
     replaced the example with one built on `pn53x.poll`.
   - **This slice's PN532 response-parsing code has not been run against
-    real hardware yet** (no PN532 board in this environment). Ian: please
+    real hardware yet** (no PN532 board in this environment). Please
     smoke-test `examples/main.toit` against your board before relying on
     `list-passive-targets`/`poll` for anything real.
   - Deliberately did NOT touch `toit-mfrc522`'s commented-out hardware-path
@@ -131,7 +131,7 @@ attacks). **Decision: no hybrid — software-only, for everything, on any
 reader that can do raw frames.** The `MFAuthent`-style hardware command
 can't do nested authentication regardless (you can't get at the raw nonce
 exchange once the chip's own crypto unit is engaged), and nested
-authentication is required for key-recovery attacks — one of Ian's v1
+authentication is required for key-recovery attacks — one of the v1
 goals for `toit-mifare-classic`. Since the software path is needed anyway,
 a separate hardware-only fast path for plain reads is pure added
 complexity (two code paths to maintain and debug) for a speed difference
@@ -247,7 +247,7 @@ time:
     `CardType` in `toit-nfc` already covers what's identifiable from SAK
     alone; going further (eg. NTAG213 vs 215 vs 216) needs
     `GET_VERSION`, which needs hardware.
-  - Confidence notes, both flagged to Ian directly and in each package's
+  - Confidence notes, both flagged directly and in each package's
     README rather than as hedge-words buried in code comments: the MAD
     CRC parameters (`CRC-8/MIFARE-MAD`: poly `0x1D`, init `0xC7`) are
     self-checked against that algorithm's own published test vector
@@ -262,7 +262,7 @@ time:
     or the reverse) rather than against real data, since that's the
     strongest check available without hardware.
 
-- **2026-11-06 (toit-des, and Ultralight C auth):** Ian asked whether
+- **2026-11-06 (toit-des, and Ultralight C auth):** Asked whether
   3DES is viable in software given it's not in the SDK. Answer: yes —
   3DES's weaknesses (64-bit block size, effective key strength below its
   nominal bit count) are about scale, not about it being broken the way
@@ -420,7 +420,7 @@ time:
 
 - **2026-11-07 (toit-des-fire, new package):** Built DESFire's legacy
   (DES/2K3DES) native command set on `IsoDepCard` + `toit-des`, in a new
-  repo Ian created (same pattern as `toit-des`: it's a card-family
+  new repo created for it (same pattern as `toit-des`: it's a card-family
   package, not a core piece, so it doesn't belong in `toit-nfc` itself).
   - Implemented: `GetVersion` (exercises `IsoDepCard`'s own multi-frame
     chaining via DESFire's `0xAF` "additional frame" status, a different
@@ -462,7 +462,7 @@ time:
     DESFire card.
 
 - **2026-11-07 (DESFire secure messaging, ISO/AES authentication, and
-  parking Classic key recovery):** Ian asked to do the remaining 4
+  parking Classic key recovery):** Asked to do the remaining 4
   hardware-free items from the prior session. Did all four, in this
   order:
   - **Crypto1 test vectors**: added a second real-world captured trace
@@ -493,7 +493,7 @@ time:
     first ~5 bits per half, then switches to a fused search tracking
     partial LFSR-feedback parity bits (`update_contribution`) joined
     via a custom bucket-sort, because a naive full cross-join of the
-    two ~500K-candidate tables is ~317 billion pairs. Ian chose to
+    two ~500K-candidate tables is ~317 billion pairs. Chose to
     park this here (verified cipher core as a solid foundation) rather
     than port the bucket-sort tree search now, and work the two
     DESFire items instead. **To resume**: the verified scratch code is
@@ -537,11 +537,11 @@ time:
     reverting.
   - **Hardware test examples**: wrote/updated `examples/main.toit` in
     `toit-pn53x`, `toit-mifare-classic`, `toit-mifare-ultralight`, and
-    `toit-des-fire`, all targeting Ian's I2C test harness (PN532: SDA
+    `toit-des-fire`, all targeting the I2C test harness (PN532: SDA
     GPIO19, SCL GPIO20, IRQ GPIO7, RESET GPIO6) — see "Hardware test
     plan" below for the procedure. All four compile cleanly (`jag toit
     compile -s`); none have been run against real hardware yet (that's
-    the point — they're what Ian runs next).
+    the point — they're what runs next, on real hardware).
 
 ## Carried over from toit-mfrc522's TODO.md and .reference/notes.txt
 
@@ -599,7 +599,7 @@ nested-auth bug above needs a wider net to catch.
 3. ~~Build `toit-mifare-classic` on the core interface~~ — done (software
    Crypto1 only, see above). Running the same example against a PN532
    board is still outstanding — needs real hardware testing, which
-   hasn't happened yet (Ian is travelling).
+   hasn't happened yet (travel got in the way).
 4. ~~Add `toit-mifare-ultralight` for NTAG support~~ — done (read, write,
    authenticate, get-version, read-signature, read-counter). Not run
    against a real chip yet.
@@ -632,7 +632,7 @@ nested-auth bug above needs a wider net to catch.
 
 As of 2026-11-07, every package that doesn't strictly need hardware to
 write or test has been built: core interfaces, all 8 repos' main
-functionality, and example programs targeting Ian's actual I2C
+functionality, and example programs targeting the actual I2C
 harness. What's left genuinely needs real silicon, in two groups:
 
 **Needs only the I2C harness (PN532)** — run `toit-pn53x`'s example
@@ -675,7 +675,7 @@ before the above.
 
 ## Hardware test plan (I2C harness)
 
-Ian's I2C test harness: PN532, SDA GPIO19, SCL GPIO20, IRQ GPIO7,
+The I2C test harness: PN532, SDA GPIO19, SCL GPIO20, IRQ GPIO7,
 RESET GPIO6. These constants are duplicated at the top of each example
 below (`SDA`/`SCL`/`IRQ`/`RESET`) rather than shared, since each
 example is a separate, self-contained Toit program in a different
@@ -725,7 +725,7 @@ kinds of failure than a bare crash.
 
 ## Upstream
 
-Ian's repos are forks-of-intent, not forks-of-code, pointed at
+These repos are forks-of-intent, not forks-of-code, pointed at
 `milkmansson/*` on `origin` with `toitware/*` as `upstream` (fetch-only —
 no push access there). Once this is further along, next step is to talk to
 floitsch about whether/how this lands upstream (likely squash-merged into
